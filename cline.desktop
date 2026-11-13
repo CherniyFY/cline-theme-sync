@@ -1,0 +1,9 @@
+[Desktop Entry]
+Categories=Development;
+Comment=Cline AI coding agent (starts with the KDE color scheme)
+Exec=@EXEC@
+StartupWMClass=cline-app
+Icon=cline-app
+Name=Cline
+Terminal=false
+Type=Application

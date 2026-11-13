@@ -56,7 +56,7 @@ not shadow anything and the system entry still starts `cline-app` directly.
 Installs:
 
 - `~/.local/bin/cline-theme-sync` → symlink to this repo's script
-- `~/.local/share/applications/Cline.desktop` → generated with an absolute `Exec=`
+- `~/.local/share/applications/Cline.desktop` → generated with a quoted absolute `Exec=`
 
 Then restart Cline once.
 
@@ -69,6 +69,8 @@ Then restart Cline once.
 - Launching `cline-app` directly from a terminal bypasses the wrapper.
 - On a first-ever launch (no localStorage file yet) the app keeps its own
   default; the next launch is synced.
+- Desktop launcher paths may contain spaces, quotes, and shell punctuation.
+  Paths containing `=`, `%`, or control characters are unsupported.
 
 ## Manual sync / debug
 

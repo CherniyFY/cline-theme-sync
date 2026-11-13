@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Start Cline Desktop with the theme that matches the current KDE color scheme.
+
+Cline Desktop 0.0.49 has no "follow system" appearance option: at startup it
+reads localStorage["cline-hub-theme"] ("light" or "dark") and otherwise falls
+back to dark. It never re-reads the value while running, so the only way to
+track the desktop is to write the right value before the app starts.
+
+The value is derived from the window background color in ~/.config/kdeglobals,
+which plasma writes whenever the color scheme changes (BreezeDark -> dark,
+BreezeLight -> light, custom schemes by luminance).
+
+Launching through this wrapper means the in-app Light/Dark toggle no longer
+sticks: every launch re-applies the desktop theme.
+"""
+
+import glob
+import os
+import sqlite3
+import sys
+
+APP_BIN = "/usr/bin/cline-app"
+THEME_KEY = "cline-hub-theme"
+
+
+def data_dir() -> str:
+	return os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+
+
+def config_dir() -> str:
+	return os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+
+
+def window_background() -> tuple[int, int, int] | None:
+	"""BackgroundNormal of the [Colors:Window] group in kdeglobals."""
+	section = None
+	try:
+		with open(os.path.join(config_dir(), "kdeglobals"), encoding="utf-8") as fh:
+			for raw in fh:
+				line = raw.strip()
+				if line.startswith("["):
+					section = line
+				elif section == "[Colors:Window]" and line.startswith(
+					"BackgroundNormal="
+				):
+					parts = line.split("=", 1)[1].split(",")
+					return int(parts[0]), int(parts[1]), int(parts[2])
+	except (OSError, ValueError, IndexError):
+		return None
+	return None
+
+
+def system_theme() -> str:
+	rgb = window_background()
+	if rgb is None:
+		return "dark"  # Cline's own default when the scheme cannot be read
+	r, g, b = rgb
+	luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+	return "light" if luminance >= 0.5 else "dark"
+
+
+def localstorage_db() -> str | None:
+	pattern = os.path.join(
+		data_dir(), "bot.cline.app", "localstorage", "tauri_localhost_*.localstorage"
+	)
+	matches = sorted(glob.glob(pattern))
+	return matches[0] if matches else None
+
+
+def sync_theme() -> str:
+	"""Write the desktop theme into Cline's localStorage. Returns the theme."""
+	theme = system_theme()
+	db = localstorage_db()
+	if db is None:
+		return theme  # app has never run, it creates the file itself
+	value = theme.encode("utf-16-le")
+	con = sqlite3.connect(db, timeout=5)
+	try:
+		con.execute(
+			"CREATE TABLE IF NOT EXISTS ItemTable ("
+			"key TEXT UNIQUE ON CONFLICT REPLACE, "
+			"value BLOB NOT NULL ON CONFLICT FAIL)"
+		)
+		row = con.execute(
+			"SELECT value FROM ItemTable WHERE key = ?", (THEME_KEY,)
+		).fetchone()
+		if row is not None and bytes(row[0]) == value:
+			return theme
+		con.execute(
+			"INSERT INTO ItemTable (key, value) VALUES (?, ?)", (THEME_KEY, value)
+		)
+		con.commit()
+	finally:
+		con.close()
+	return theme
+
+
+def main() -> None:
+	if "--sync-only" in sys.argv:  # used by tests and manual refresh
+		print(sync_theme())
+		return
+	try:
+		sync_theme()
+	except Exception as exc:  # never block the app because of a theme write
+		print(f"cline-theme-sync: {exc}", file=sys.stderr)
+	os.execv(APP_BIN, [APP_BIN, *sys.argv[1:]])
+
+
+if __name__ == "__main__":
+	main()
